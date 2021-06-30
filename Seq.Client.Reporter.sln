@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31410.357
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Seq.Client.Reporter", "Seq.Client.Reporter\Seq.Client.Reporter.csproj", "{4345CA80-56D0-4E6E-9228-34DF2BB5C689}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{4345CA80-56D0-4E6E-9228-34DF2BB5C689}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4345CA80-56D0-4E6E-9228-34DF2BB5C689}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4345CA80-56D0-4E6E-9228-34DF2BB5C689}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4345CA80-56D0-4E6E-9228-34DF2BB5C689}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {F8AB89A0-9261-4EE0-BC92-BC9FBCBB499A}
+	EndGlobalSection
+EndGlobal
