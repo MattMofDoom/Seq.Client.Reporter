@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
@@ -19,54 +21,83 @@ namespace Seq.Client.Reporter
         {
             //Disable remote certificate validation
             ServicePointManager.ServerCertificateValidationCallback += ValidateCertificate;
-
             var isConfig = false;
+
+            //Initialise logging and alerting
             Logging.SetConfig();
             Alerting.SetConfig();
 
+            //Parse arguments for config directive
             foreach (var arg in args)
                 if (arg.StartsWith("-config", StringComparison.CurrentCultureIgnoreCase))
                 {
                     var configPath = arg.Split('=');
+
                     if (string.IsNullOrEmpty(configPath[1]) || !File.Exists(configPath[1])) continue;
+
                     isConfig = true;
                     Config.GetConfig(configPath[1]);
+
                     if (string.IsNullOrEmpty(Config.Query))
                         ExitApp(ExitCodes.NoQuery);
+
                     if (Config.TimeFrom == null)
                         ExitApp(ExitCodes.TimeFromInvalid);
+
                     if (Config.TimeTo == null)
                         ExitApp(ExitCodes.TimeToInvalid);
+
+                    //Pass overrides of alert and logging from config file
                     GetAlertConfigOverrides();
                     GetLoggingConfigOverrides();
                 }
 
+            //If a config wasn't passed, display an error and exit
+            if (!isConfig) ExitApp(ExitCodes.NoConfig);
+
             Log.Level().Add("{AppName:l} v{AppVersion:l} starting", Config.AppName, Config.AppVersion);
             Log.Level().Add("Seq Server: {SeqServer:l}, Api Key: {IsApiKey}", Logging.Config.LogSeqServer,
                 !string.IsNullOrEmpty(Logging.Config.LogSeqApiKey));
-
-            if (!isConfig)
-            {
-                Log.Add("You must specify a valid config file with -config=<pathtoconfig>");
-                Logging.Close();
-                Environment.Exit(1);
-            }
-
-            Log.Level().Add("Query: {Query}", Config.Query);
+            Log.Level(LurgLevel.Debug).Add("Query: {Query:l}", Config.Query);
             // ReSharper disable once PossibleInvalidOperationException
             Log.Level().Add("Output query from {Start:F} to {End:F}", ((DateTime) Config.TimeFrom).ToLocalTime(),
                 // ReSharper disable once PossibleInvalidOperationException
                 ((DateTime) Config.TimeTo).ToLocalTime());
             var connection = new SeqConnection(Logging.Config.LogSeqServer, Logging.Config.LogSeqApiKey);
-            SignalEntity signal;
-            try
+            var signals = new List<SignalEntity>();
+            SignalExpressionPart signalExpression;
+            foreach (var s in Config.Signal)
+                try
+                {
+                    var signal = connection.Signals.FindAsync(s).Result;
+                    if (signal.Id != null)
+                    {
+                        Log.Level().Add("Signal '{SignalId:l}' ({Signal:l}) will be added to query", s, signal.Title);
+                        signals.Add(signal);
+                    }
+                    else
+                    {
+                        Log.Level(LurgLevel.Warning)
+                            .Add("Could not find signal '{SignalId:l}' - will not be used for query", s);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Exception(ex).Add("Error parsing signal '{Signal:l}': {Message:l}", s, ex.Message);
+                }
+
+            switch (signals.Count)
             {
-                signal = connection.Signals.FindAsync(Config.Signal).Result;
-                Log.Level().Add("Signal '{Signal}' will be used to filter query", signal.Title);
-            }
-            catch (Exception)
-            {
-                signal = new SignalEntity();
+                case 0:
+                    signalExpression = new SignalExpressionPart {Kind = SignalExpressionKind.None};
+                    break;
+                case 1:
+                    signalExpression = new SignalExpressionPart
+                        {Kind = SignalExpressionKind.Signal, SignalId = signals[0].Id};
+                    break;
+                default:
+                    signalExpression = SignalExpressionPart.FromIntersectedIds(signals.Select(s => s.Id).ToList());
+                    break;
             }
 
             Log.Level().Add("Executing query ...");
@@ -74,87 +105,95 @@ namespace Seq.Client.Reporter
             try
             {
                 QueryResultPart data;
-                if (signal.Id != null)
+                if (signalExpression.Kind != SignalExpressionKind.None)
                     data = connection.Data.QueryAsync(Config.Query, Config.TimeFrom, Config.TimeTo,
-                        SignalExpressionPart.Signal(signal.Id)).Result;
+                        signalExpression, timeout: TimeSpan.FromMinutes(Config.QueryTimeout)).Result;
                 else
-                    data = connection.Data.QueryAsync(Config.Query, Config.TimeFrom, Config.TimeTo).Result;
+                    data = connection.Data.QueryAsync(Config.Query, Config.TimeFrom, Config.TimeTo,
+                        timeout: TimeSpan.FromMinutes(Config.QueryTimeout)).Result;
 
                 if (!string.IsNullOrEmpty(data.Error))
                 {
-                    Log.Level(LurgLevel.Error).Add("Error returned from Seq: {Error}", data.Error);
+                    Log.Level(LurgLevel.Error).Add("Error returned from Seq: {Error:l}", data.Error);
                     ExitApp(ExitCodes.QueryError);
                 }
 
                 if (data.Rows.Length > 0)
                 {
-                    var filePath = Path.GetTempFileName();
-                    if (!Directory.Exists(Path.GetDirectoryName(filePath)))
-                        try
-                        {
-                            Directory.CreateDirectory(Path.GetDirectoryName(filePath) ?? string.Empty);
-                        }
-                        catch (Exception)
-                        {
-                            ExitApp(ExitCodes.CsvFolderNotFound);
-                        }
-
-                    Log.Level().Add("Outputting results to {FilePath:l}", filePath);
                     try
                     {
-                        var recordCount = 0;
-                        var writer = new StreamWriter(filePath);
-                        var csv = new CsvWriter(writer, CultureInfo.CurrentCulture, true);
-                        Log.Level().Add("Adding header ...");
-                        foreach (var col in data.Columns)
-                            csv.WriteField(col);
-
-                        csv.NextRecord();
-                        Log.Level().Add("Parsing and adding rows ...");
-                        foreach (var logRow in data.Rows)
-                        {
-                            recordCount++;
-                            foreach (var logCol in logRow)
-                                csv.WriteField(logCol);
-                            csv.NextRecord();
-                        }
-
-                        csv.Dispose();
-                        writer.Flush();
-                        writer.Close();
-
-
+                        var filePath = Path.GetTempFileName();
+                        Log.Level().Add("Total rows returned (excluding headers): {TotalRows}", data.Rows.Length);
+                        Log.Level().Add("Outputting results to {FilePath:l}", filePath);
                         try
                         {
-                            Log.Level().Add("Sending via email to {MailTo:l} ...", Alerting.Config.MailTo);
-                            Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
-                                .Attach(new MemoryStream(File.ReadAllBytes(filePath)),
-                                    $"{Config.AppName}-{DateTime.Today:yyyy-M-d}.csv")
-                                .SendTemplateFile("Report", new
+                            var recordCount = 0;
+                            var writer = new StreamWriter(filePath);
+                            var csv = new CsvWriter(writer, CultureInfo.CurrentCulture, true);
+                            Log.Level().Add("Adding header ...");
+                            foreach (var col in data.Columns)
+                                csv.WriteField(col);
+
+                            csv.NextRecord();
+                            Log.Level().Add("Parsing and adding rows ...");
+                            foreach (var logRow in data.Rows)
+                            {
+                                recordCount++;
+                                foreach (var logCol in logRow)
+                                    csv.WriteField(logCol);
+                                csv.NextRecord();
+                            }
+
+                            csv.Dispose();
+                            writer.Flush();
+                            writer.Close();
+
+
+                            try
+                            {
+                                Log.Level().Add(
+                                    "Sending via email to {MailTo:l} via {MailHost:l}:{MailPort} (Use TLS: {UseTls}...",
+                                    Alerting.Config.MailTo, Alerting.Config.MailHost, Alerting.Config.MailPort,
+                                    Alerting.Config.MailUseTls);
+                                if (!Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
+                                    .Attach(new MemoryStream(File.ReadAllBytes(filePath)),
+                                        $"{Config.AppName}-{DateTime.Today:yyyy-M-d}.csv")
+                                    .SendTemplateFile("Report", new
+                                    {
+                                        ReportName = Config.AppName,
+                                        Date = DateTime.Today.ToLongDateString(),
+                                        From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
+                                        To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
+                                        RecordCount = recordCount.ToString()
+                                    }))
                                 {
-                                    ReportName = Config.AppName,
-                                    Date = DateTime.Today.ToLongDateString(),
-                                    From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
-                                    To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
-                                    RecordCount = recordCount.ToString()
-                                });
+                                    Log.Level(LurgLevel.Error).Add("Mail failed to send!");
+                                    ExitApp(ExitCodes.MailError, filePath);
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                Log.Exception(ex).Add("Error sending email: {Message:l}", ex.Message);
+                                ExitApp(ExitCodes.MailError, filePath);
+                            }
+
+                            ExitApp(ExitCodes.Success, filePath);
                         }
                         catch (Exception ex)
                         {
-                            Log.Exception(ex).Add("Error sending email: {Message:l}", ex.Message);
-                            ExitApp(ExitCodes.MailError);
+                            Log.Exception(ex).Add("Error writing CSV: {Error:l}", ex.Message);
+                            ExitApp(ExitCodes.ErrorWritingCsv, filePath);
                         }
-
-                        ExitApp(ExitCodes.Success);
                     }
                     catch (Exception ex)
                     {
-                        Log.Exception(ex).Add("Error writing CSV: {Error:l}", ex.Message);
-                        ExitApp(ExitCodes.ErrorWritingCsv);
+                        Log.Exception(ex).Add("Error creating temp file: {Error:l}", ex.Message);
+                        ExitApp(ExitCodes.TempFileError);
                     }
                 }
                 else
                 {
+                    Log.Level(LurgLevel.Error).Add("No data returned, exiting ...");
                     ExitApp(ExitCodes.NoDataReturned);
                 }
             }
@@ -163,6 +202,8 @@ namespace Seq.Client.Reporter
                 Log.Exception(ex).Add("Error executing query: {Error:l}", ex.Message);
                 ExitApp(ExitCodes.QueryError);
             }
+
+            ExitApp(ExitCodes.NothingDone);
         }
 
         private static void GetAlertConfigOverrides()
@@ -252,7 +293,7 @@ namespace Seq.Client.Reporter
             Logging.SetConfig(currentLogConfig);
         }
 
-        private static void ExitApp(ExitCodes exitCode)
+        private static void ExitApp(ExitCodes exitCode, string tempFile = null)
         {
             LurgLevel logLevel;
 
@@ -268,8 +309,30 @@ namespace Seq.Client.Reporter
                     break;
             }
 
-            Log.Level(logLevel).Add("{AppName:l} v{AppVersion:l} exiting with result {ExitCode}", Config.AppName,
-                Config.AppVersion,
+            if (Logging.Config == null)
+                Logging.SetConfig(new LoggingConfig(Logging.Config, logType: new List<LogType> {LogType.Console},
+                    logLevel: LurgLevel.Verbose,
+                    logLevelConsole: LurgLevel.Verbose));
+
+            if (exitCode.Equals(ExitCodes.NoConfig))
+                Log.Level().Add(
+                    "{AppName:l} {AppVersion:l} - You must specify a valid config file with -config=<path to config>",
+                    Logging.Config?.AppName, Logging.Config?.AppVersion);
+
+            if (!string.IsNullOrEmpty(tempFile))
+                try
+                {
+                    Log.Level().Add("Cleaning up {tempFile} ...", tempFile);
+                    File.Delete(tempFile);
+                }
+                catch (Exception ex)
+                {
+                    Log.Exception(ex).Add("Error deleting temp file: {Message}", ex.Message);
+                }
+
+            Log.Level(logLevel).Add("{AppName:l} v{AppVersion:l} exiting with result {ExitCode}",
+                string.IsNullOrEmpty(Config.AppName) ? Logging.Config?.AppName : Config.AppName,
+                string.IsNullOrEmpty(Config.AppVersion) ? Logging.Config?.AppVersion : Config.AppVersion,
                 exitCode);
 
             Logging.Close();

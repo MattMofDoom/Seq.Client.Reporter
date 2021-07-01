@@ -10,7 +10,13 @@
 *.userosscache
 *.sln.docstates
 FundsTransfer.config
+FundsTransferDaily.config
+FundsTransferWeekly.config
+LinuxJobStats.config
+SFTPTransferJobStats.config
+SQLJobStats.config
 secrets.config
+launchSettings.json
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

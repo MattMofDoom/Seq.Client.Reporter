@@ -9,8 +9,9 @@
         TimeToInvalid = 4,
         NoDataReturned = 5,
         ErrorWritingCsv = 6,
-        CsvFolderNotFound = 7,
+        TempFileError = 7,
         QueryError = 8,
-        MailError = 9
+        MailError = 9,
+        NothingDone = 10
     }
 }
