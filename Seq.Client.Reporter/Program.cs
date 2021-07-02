@@ -37,6 +37,8 @@ namespace Seq.Client.Reporter
 
                     isConfig = true;
                     Config.GetConfig(configPath[1]);
+                    if (Config.IsDebug)
+                        Alerting.SetDebug(true);
 
                     if (string.IsNullOrEmpty(Config.Query))
                         ExitApp(ExitCodes.NoQuery);
@@ -56,14 +58,48 @@ namespace Seq.Client.Reporter
             if (!isConfig) ExitApp(ExitCodes.NoConfig);
 
             Log.Level().Add("{AppName:l} v{AppVersion:l} starting", Config.AppName, Config.AppVersion);
-            Log.Level().Add("Seq Server: {SeqServer:l}, Api Key: {IsApiKey}", Logging.Config.LogSeqServer,
-                !string.IsNullOrEmpty(Logging.Config.LogSeqApiKey));
-            Log.Level(LurgLevel.Debug).Add("Query: {Query:l}", Config.Query);
+            Log.Level().Add("Seq Server: {SeqServer:l}, Api Key: {IsApiKey}, Use Proxy: {IsProxy}",
+                Logging.Config.LogSeqServer,
+                !string.IsNullOrEmpty(Logging.Config.LogSeqApiKey), Config.UseProxy);
+            if (Config.IsDebug)
+                Log.Level(LurgLevel.Debug).Add("Query: {Query:l}", Config.Query);
             // ReSharper disable once PossibleInvalidOperationException
             Log.Level().Add("Output query from {Start:F} to {End:F}", ((DateTime) Config.TimeFrom).ToLocalTime(),
                 // ReSharper disable once PossibleInvalidOperationException
                 ((DateTime) Config.TimeTo).ToLocalTime());
-            var connection = new SeqConnection(Logging.Config.LogSeqServer, Logging.Config.LogSeqApiKey);
+
+            var connection = new SeqConnection(Logging.Config.LogSeqServer, Logging.Config.LogSeqApiKey,
+                handler =>
+                {
+                    handler.UseProxy = Config.UseProxy;
+                    if (Config.UseProxy)
+                    {
+                        var proxy = new WebProxy
+                        {
+                            Address = new Uri(Config.ProxyServer),
+                            BypassProxyOnLocal = Config.BypassProxyOnLocal,
+                            BypassList = Config.ProxyBypass.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries)
+                                .Select(t => t.Trim()).ToArray(),
+                            UseDefaultCredentials = false
+                        };
+
+                        if (!string.IsNullOrEmpty(Config.ProxyUser) && !string.IsNullOrEmpty(Config.ProxyPassword))
+                            proxy.Credentials = new NetworkCredential(Config.ProxyUser, Config.ProxyPassword);
+                        else
+                            proxy.UseDefaultCredentials = true;
+
+                        handler.Proxy = proxy;
+                        handler.UseDefaultCredentials = false;
+                    }
+                    else
+                    {
+                        handler.UseDefaultCredentials = true;
+                    }
+
+                    handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+                });
+
+
             var signals = new List<SignalEntity>();
             SignalExpressionPart signalExpression;
             foreach (var s in Config.Signal)
@@ -151,11 +187,19 @@ namespace Seq.Client.Reporter
 
                             try
                             {
-                                Log.Level().Add(
-                                    "Sending via email to {MailTo:l} via {MailHost:l}:{MailPort} (Use TLS: {UseTls}...",
-                                    Alerting.Config.MailTo, Alerting.Config.MailHost, Alerting.Config.MailPort,
-                                    Alerting.Config.MailUseTls);
-                                if (!Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
+                                if (Config.IsDebug)
+                                    Log.Level().Add(
+                                        "Sending via email to {MailTo:l} (Debug mode: {MailDebug:l}) via {MailHost:l}:{MailPort} (Use TLS: {UseTls})...",
+                                        Alerting.Config.MailTo, Alerting.Config.MailDebug, Alerting.Config.MailHost,
+                                        Alerting.Config.MailPort,
+                                        Alerting.Config.MailUseTls);
+                                else
+                                    Log.Level().Add(
+                                        "Sending via email to {MailTo:l} via {MailHost:l}:{MailPort} (Use TLS: {UseTls})...",
+                                        Alerting.Config.MailTo, Alerting.Config.MailHost, Alerting.Config.MailPort,
+                                        Alerting.Config.MailUseTls);
+
+                                var alert = Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
                                     .Attach(new MemoryStream(File.ReadAllBytes(filePath)),
                                         $"{Config.AppName}-{DateTime.Today:yyyy-M-d}.csv")
                                     .SendTemplateFile("Report", new
@@ -165,10 +209,21 @@ namespace Seq.Client.Reporter
                                         From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
                                         To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
                                         RecordCount = recordCount.ToString()
-                                    }))
+                                    });
+
+                                if (!alert.Successful)
                                 {
-                                    Log.Level(LurgLevel.Error).Add("Mail failed to send!");
+                                    Log.Level(LurgLevel.Error)
+                                        .Add(
+                                            "{ReportName:l} email failed to send! Email errors will be output as debug events.",
+                                            Config.AppName);
+                                    foreach (var error in alert.ErrorMessages)
+                                        Log.Level(LurgLevel.Debug).Add("Email error: {Message:l}", error);
                                     ExitApp(ExitCodes.MailError, filePath);
+                                }
+                                else
+                                {
+                                    Log.Level().Add("{ReportName:l} email sent successfully!", Config.AppName);
                                 }
                             }
                             catch (Exception ex)
@@ -227,6 +282,9 @@ namespace Seq.Client.Reporter
                 currentAlertConfig = new AlertConfig(currentAlertConfig, mailFrom: alertConfig.MailFrom);
 
             if (!string.IsNullOrEmpty(alertConfig.MailTo))
+                currentAlertConfig = new AlertConfig(currentAlertConfig, mailTo: alertConfig.MailTo);
+
+            if (!string.IsNullOrEmpty(alertConfig.MailDebug))
                 currentAlertConfig = new AlertConfig(currentAlertConfig, mailTo: alertConfig.MailTo);
 
             Alerting.SetConfig(currentAlertConfig);

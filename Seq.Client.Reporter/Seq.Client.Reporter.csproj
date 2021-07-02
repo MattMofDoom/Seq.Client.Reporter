@@ -2,13 +2,16 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net461</TargetFramework>
+    <TargetFramework>net462</TargetFramework>
     <StartupObject>Seq.Client.Reporter.Program</StartupObject>
+    <ApplicationIcon>Reporter.ico</ApplicationIcon>
+    <PackageIcon>Reporter.png</PackageIcon>
+    <PackageIconUrl />
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="CsvHelper" Version="27.1.1" />
-    <PackageReference Include="Lurgle.Alerting" Version="1.2.0" />
+    <PackageReference Include="Lurgle.Alerting" Version="1.2.1" />
     <PackageReference Include="Lurgle.Logging" Version="1.2.1" />
     <PackageReference Include="Seq.Api" Version="2021.2.0" />
   </ItemGroup>
@@ -34,6 +37,10 @@
     </None>
     <None Update="Templates\alertReport.html">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+    <None Include="Reporter.png">
+      <Pack>True</Pack>
+      <PackagePath></PackagePath>
     </None>
   </ItemGroup>
 

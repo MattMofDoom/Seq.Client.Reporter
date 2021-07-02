@@ -16,10 +16,18 @@ namespace Seq.Client.Reporter
         public static string ConfigPath { get; private set; }
         public static string AppName { get; private set; }
         public static string AppVersion { get; private set; }
+        public static bool IsDebug { get; private set; }
         public static string Query { get; private set; }
         public static int QueryTimeout { get; private set; }
         public static DateTime? TimeFrom { get; private set; }
         public static DateTime? TimeTo { get; private set; }
+        public static bool UseProxy { get; private set; }
+        public static string ProxyServer { get; private set; }
+        public static bool BypassProxyOnLocal { get; private set; }
+        public static string ProxyBypass { get; private set; }
+        public static string ProxyUser { get; private set; }
+        public static string ProxyPassword { get; private set; }
+
 
         public static IEnumerable<string> Signal { get; private set; }
 
@@ -40,6 +48,7 @@ namespace Seq.Client.Reporter
         {
             ConfigPath = AppDomain.CurrentDomain.GetData("APP_CONFIG_FILE").ToString();
             AppName = ConfigurationManager.AppSettings["AppName"];
+            IsDebug = GetBool(ConfigurationManager.AppSettings["IsDebug"]);
             Query = ConfigurationManager.AppSettings["Query"].Replace("\\r", "").Replace("\\n", "");
             QueryTimeout = GetInt(ConfigurationManager.AppSettings["Query"]);
             TimeFrom = GetStart(ConfigurationManager.AppSettings["TimeFrom"]);
@@ -48,6 +57,12 @@ namespace Seq.Client.Reporter
             if (TimeFrom != null && TimeTo != null && ((DateTime) TimeTo - (DateTime) TimeFrom).TotalSeconds <= 0)
                 TimeFrom = ((DateTime) TimeFrom).AddDays(-1);
             Signal = GetSignals(ConfigurationManager.AppSettings["Signal"]);
+            UseProxy = GetBool(ConfigurationManager.AppSettings["UseProxy"]);
+            ProxyServer = ConfigurationManager.AppSettings["ProxyServer"];
+            BypassProxyOnLocal = GetBool(ConfigurationManager.AppSettings["BypassProxyOnLocal"]);
+            ProxyBypass = ConfigurationManager.AppSettings["ProxyBypass"];
+            ProxyUser = ConfigurationManager.AppSettings["ProxyUser"];
+            ProxyPassword = ConfigurationManager.AppSettings["ProxyPassword"];
 
             var isSuccess = true;
             try
@@ -204,6 +219,22 @@ namespace Seq.Client.Reporter
             if (int.TryParse(sourceString, out var destInt)) return destInt;
 
             return -1;
+        }
+
+        /// <summary>
+        ///     Convert the supplied <see cref="object" /> to a <see cref="bool" />
+        ///     <para />
+        ///     This will filter out nulls that could otherwise cause exceptions
+        /// </summary>
+        /// <param name="sourceObject">An object that can be converted to a bool</param>
+        /// <returns></returns>
+        public static bool GetBool(object sourceObject)
+        {
+            var sourceString = string.Empty;
+
+            if (!Convert.IsDBNull(sourceObject)) sourceString = (string) sourceObject;
+
+            return bool.TryParse(sourceString, out var destBool) && destBool;
         }
     }
 }
