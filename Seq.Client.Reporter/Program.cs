@@ -209,7 +209,7 @@ namespace Seq.Client.Reporter
                                         From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
                                         To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
                                         RecordCount = recordCount.ToString()
-                                    });
+                                    }, true, true);
 
                                 if (!alert.Successful)
                                 {

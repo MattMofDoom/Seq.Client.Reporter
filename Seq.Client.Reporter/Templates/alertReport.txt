@@ -1,0 +1,3 @@
+﻿Please find the {{ReportName}} for {{Date}} attached.
+Report period: {{From}} to {{To}}
+{{RecordCount}} records were returned.
