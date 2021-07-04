@@ -17,6 +17,7 @@ SFTPTransferJobStats.config
 SQLJobStats.config
 secrets.config
 launchSettings.json
+MonthlyReports.cmd
 
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs

@@ -28,6 +28,9 @@
     <None Update="LinuxJobStats.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
+    <None Update="MonthlyReports.cmd">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
     <None Update="SFTPTransferJobStats.config">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
