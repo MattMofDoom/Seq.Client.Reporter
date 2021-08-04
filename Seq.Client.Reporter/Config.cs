@@ -63,7 +63,7 @@ namespace Seq.Client.Reporter
             ValidateTls = GetBool(ConfigurationManager.AppSettings["ValidateTls"], true);
             IsDebug = GetBool(ConfigurationManager.AppSettings["IsDebug"]);
             Query = ConfigurationManager.AppSettings["Query"].Replace("\\r", "").Replace("\\n", "");
-            QueryTimeout = GetInt(ConfigurationManager.AppSettings["Query"]);
+            QueryTimeout = GetInt(ConfigurationManager.AppSettings["QueryTimeout"]);
             TimeFrom = DateParse.GetDateTimeUtc(ConfigurationManager.AppSettings["TimeFrom"]);
             TimeTo = DateParse.GetDateTimeUtc(ConfigurationManager.AppSettings["TimeTo"]);
             //Ensure TimeFrom is always in the past
