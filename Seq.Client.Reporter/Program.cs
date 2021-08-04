@@ -6,8 +6,11 @@ using System.Linq;
 using System.Net;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
+using Atlassian.Jira;
 using CsvHelper;
+using HandlebarsDotNet;
 using Lurgle.Alerting;
+using Lurgle.Dates;
 using Lurgle.Logging;
 using Seq.Api;
 using Seq.Api.Model.Data;
@@ -19,8 +22,6 @@ namespace Seq.Client.Reporter
     {
         private static void Main(string[] args)
         {
-            //Disable remote certificate validation
-            ServicePointManager.ServerCertificateValidationCallback += ValidateCertificate;
             var isConfig = false;
 
             //Initialise logging and alerting
@@ -57,10 +58,15 @@ namespace Seq.Client.Reporter
             //If a config wasn't passed, display an error and exit
             if (!isConfig) ExitApp(ExitCodes.NoConfig);
 
+            //Disable remote certificate validation if configured
+            if (!Config.ValidateTls)
+                ServicePointManager.ServerCertificateValidationCallback += ValidateCertificate;
+
             Log.Level().Add("{AppName:l} v{AppVersion:l} starting", Config.AppName, Config.AppVersion);
             Log.Level().Add("Seq Server: {SeqServer:l}, Api Key: {IsApiKey}, Use Proxy: {IsProxy}",
                 Logging.Config.LogSeqServer,
                 !string.IsNullOrEmpty(Logging.Config.LogSeqApiKey), Config.UseProxy);
+
             if (Config.IsDebug)
                 Log.Level(LurgLevel.Debug).Add("Query: {Query:l}", Config.Query);
             // ReSharper disable once PossibleInvalidOperationException
@@ -99,7 +105,8 @@ namespace Seq.Client.Reporter
                     handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
                 });
 
-
+            Log.Level().Add("Setting HttpClient timeout to {Timeout} minutes", Config.QueryTimeout);
+            connection.Client.HttpClient.Timeout = TimeSpan.FromMinutes(Config.QueryTimeout);
             var signals = new List<SignalEntity>();
             SignalExpressionPart signalExpression;
             foreach (var s in Config.Signal)
@@ -185,53 +192,161 @@ namespace Seq.Client.Reporter
                             writer.Close();
 
 
-                            try
+                            if (Config.Destination.Equals(ReportDestination.Jira) ||
+                                Config.Destination.Equals(ReportDestination.EmailAndJira))
                             {
                                 if (Config.IsDebug)
                                     Log.Level().Add(
-                                        "Sending via email to {MailTo:l} (Debug mode: {MailDebug:l}) via {MailHost:l}:{MailPort} (Use TLS: {UseTls})...",
-                                        Alerting.Config.MailTo, Alerting.Config.MailDebug, Alerting.Config.MailHost,
-                                        Alerting.Config.MailPort,
-                                        Alerting.Config.MailUseTls);
-                                else
-                                    Log.Level().Add(
-                                        "Sending via email to {MailTo:l} via {MailHost:l}:{MailPort} (Use TLS: {UseTls})...",
-                                        Alerting.Config.MailTo, Alerting.Config.MailHost, Alerting.Config.MailPort,
-                                        Alerting.Config.MailUseTls);
+                                        "Sending to Jira to {JiraUrl:l} (Use Proxy: {UseProxy})...", Config.JiraUrl,
+                                        Config.UseProxy);
 
-                                var alert = Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
-                                    .Attach(new MemoryStream(File.ReadAllBytes(filePath)),
-                                        $"{Config.AppName}-{DateTime.Today:yyyy-M-d}.csv")
-                                    .SendTemplateFile("Report", new
-                                    {
-                                        ReportName = Config.AppName,
-                                        Date = DateTime.Today.ToLongDateString(),
-                                        From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
-                                        To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
-                                        RecordCount = recordCount.ToString()
-                                    }, true, true);
-
-                                if (!alert.Successful)
+                                var proxy = new WebProxy();
+                                if (Config.UseProxy)
                                 {
-                                    Log.Level(LurgLevel.Error)
-                                        .Add(
-                                            "{ReportName:l} email failed to send! Email errors will be output as debug events.",
-                                            Config.AppName);
-                                    foreach (var error in alert.ErrorMessages)
-                                        Log.Level(LurgLevel.Debug).Add("Email error: {Message:l}", error);
+                                    proxy = new WebProxy(Config.ProxyServer, Config.BypassProxyOnLocal, Config
+                                        .ProxyBypass.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(t => t.Trim()).ToArray());
+
+                                    if (!string.IsNullOrEmpty(Config.ProxyUser) &&
+                                        !string.IsNullOrEmpty(Config.ProxyPassword))
+                                    {
+                                        proxy.UseDefaultCredentials = false;
+                                        proxy.Credentials =
+                                            new NetworkCredential(Config.ProxyUser, Config.ProxyPassword);
+                                    }
+                                    else
+                                    {
+                                        proxy.UseDefaultCredentials = true;
+                                    }
+                                }
+
+                                try
+                                {
+                                    var jira = Jira.CreateRestClient(Config.JiraUrl, Config.JiraUsername,
+                                        Config.JiraPassword, new JiraRestClientSettings {Proxy = proxy});
+
+                                    var fields = new CreateIssueFields(Config.JiraProject);
+
+                                    if (!string.IsNullOrEmpty(Config.JiraInitialEstimate))
+                                    {
+                                        if (!string.IsNullOrEmpty(Config.JiraRemainingEstimate))
+                                            fields.TimeTrackingData =
+                                                new IssueTimeTrackingData(Config.JiraInitialEstimate,
+                                                    Config.JiraRemainingEstimate);
+                                        else
+                                            fields.TimeTrackingData =
+                                                new IssueTimeTrackingData(Config.JiraInitialEstimate);
+                                    }
+
+                                    var issue = jira.CreateIssue(fields);
+                                    issue.Type = Config.JiraIssueType;
+                                    issue.Priority = Config.JiraPriority;
+                                    issue.Summary = $"{Config.AppName} for {DateTime.Today:D}";
+
+                                    if (!string.IsNullOrEmpty(Config.JiraAssignee))
+                                        issue.Assignee = Config.JiraAssignee;
+
+                                    if (!string.IsNullOrEmpty(Config.JiraLabels))
+                                        issue.Labels.AddRange(new IssueLabelCollection(Config
+                                            .JiraLabels.Split(new[] {','}, StringSplitOptions.RemoveEmptyEntries)
+                                            .Select(t => t.Trim()).ToArray()));
+
+                                    if (!string.IsNullOrEmpty(Config.JiraDueDate))
+                                        issue.DueDate = DateTokens.CalculateDateExpression(Config.JiraDueDate);
+
+                                    var jiraTemplate = Path.Combine(Alerting.Config.MailTemplatePath,
+                                        Alerting.GetEmailTemplate("JiraTemplate", false));
+                                    var description =
+                                        $"Please find the {Config.AppName} for {DateTime.Today.ToLongDateString()} attached.\nReport period: {((DateTime) Config.TimeFrom).ToLocalTime():F} to {((DateTime) Config.TimeTo).ToLocalTime():F}.\n{recordCount.ToString()} records were returned.";
+
+                                    if (File.Exists(jiraTemplate))
+                                    {
+                                        var recipients = string.Empty;
+                                        if (Config.Destination.Equals(ReportDestination.EmailAndJira))
+                                            recipients = Alerting.GetEmailAddress(Alerting.Config.MailTo);
+                                        var template = File.ReadAllText(jiraTemplate);
+                                        var compiledTemplate = Handlebars.Compile(template);
+                                        description = compiledTemplate(new
+                                        {
+                                            ReportName = Config.AppName,
+                                            Date = DateTime.Today.ToLongDateString(),
+                                            From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
+                                            To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
+                                            RecordCount = recordCount.ToString(),
+                                            Destination = Config.Destination.ToString(),
+                                            Recipients = recipients
+                                        });
+                                    }
+
+                                    issue.Description = description;
+                                    issue.SaveChanges();
+                                    issue.AddAttachment($"{Config.AppName}-{DateTime.Today:yyyy-M-d}-1.csv",
+                                        File.ReadAllBytes(filePath));
+
+                                    Log.Level().Add("{ReportName:l} Report sent to Jira, Issue Key {IssueKey:l}",
+                                        Config.AppName, issue.Key.Value);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Exception(ex).Add("Error sending to Jira: {Message:l}", ex.Message);
+                                    ExitApp(ExitCodes.JiraError, filePath);
+                                }
+                            }
+
+                            if (Config.Destination.Equals(ReportDestination.Email) ||
+                                Config.Destination.Equals(ReportDestination.EmailAndJira))
+                            {
+                                try
+                                {
+                                    if (Config.IsDebug)
+                                        Log.Level().Add(
+                                            "Sending via email to {MailTo:l} (Debug mode: {MailDebug:l}) via {MailHost:l}:{MailPort} (Use TLS: {UseTls})...",
+                                            Alerting.Config.MailTo, Alerting.Config.MailDebug,
+                                            Alerting.Config.MailHost,
+                                            Alerting.Config.MailPort,
+                                            Alerting.Config.MailUseTls);
+                                    else
+                                        Log.Level().Add(
+                                            "Sending via email to {MailTo:l} via {MailHost:l}:{MailPort} (Use TLS: {UseTls})...",
+                                            Alerting.Config.MailTo, Alerting.Config.MailHost,
+                                            Alerting.Config.MailPort,
+                                            Alerting.Config.MailUseTls);
+                                    
+                                    var alert = Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
+                                        .Attach(new MemoryStream(File.ReadAllBytes(filePath)),
+                                            $"{Config.AppName}-{DateTime.Today:yyyy-M-d}.csv")
+                                        .SendTemplateFile("Report", new
+                                        {
+                                            ReportName = Config.AppName,
+                                            Date = DateTime.Today.ToLongDateString(),
+                                            From = ((DateTime) Config.TimeFrom).ToLocalTime().ToString("F"),
+                                            To = ((DateTime) Config.TimeTo).ToLocalTime().ToString("F"),
+                                            RecordCount = recordCount.ToString()
+                                        }, true, true);
+
+                                    if (!alert.Successful)
+                                    {
+                                        Log.Level(LurgLevel.Error)
+                                            .Add(
+                                                "{ReportName:l} email failed to send! Email errors will be output as debug events.",
+                                                Config.AppName);
+                                        foreach (var error in alert.ErrorMessages)
+                                            Log.Level(LurgLevel.Debug).Add("Email error: {Message:l}", error);
+                                        ExitApp(ExitCodes.MailError, filePath);
+                                    }
+                                    else
+                                    {
+                                        Log.Level().Add("{ReportName:l} email sent successfully!", Config.AppName);
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log.Exception(ex).Add("Error sending email: {Message:l}", ex.Message);
                                     ExitApp(ExitCodes.MailError, filePath);
                                 }
-                                else
-                                {
-                                    Log.Level().Add("{ReportName:l} email sent successfully!", Config.AppName);
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                Log.Exception(ex).Add("Error sending email: {Message:l}", ex.Message);
-                                ExitApp(ExitCodes.MailError, filePath);
                             }
 
+                            //Successful execution, exit with success
                             ExitApp(ExitCodes.Success, filePath);
                         }
                         catch (Exception ex)
