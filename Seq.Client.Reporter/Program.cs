@@ -105,7 +105,7 @@ namespace Seq.Client.Reporter
                     handler.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
                 });
 
-
+            connection.Client.HttpClient.Timeout = TimeSpan.FromMinutes(Config.QueryTimeout);
             var signals = new List<SignalEntity>();
             SignalExpressionPart signalExpression;
             foreach (var s in Config.Signal)
