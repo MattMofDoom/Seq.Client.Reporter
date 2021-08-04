@@ -1,10 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
-using System.Globalization;
 using System.Linq;
 using System.Reflection;
-using System.Text.RegularExpressions;
+using Lurgle.Dates;
 
 // ReSharper disable MemberCanBePrivate.Global
 // ReSharper disable UnusedAutoPropertyAccessor.Global
@@ -16,11 +15,24 @@ namespace Seq.Client.Reporter
         public static string ConfigPath { get; private set; }
         public static string AppName { get; private set; }
         public static string AppVersion { get; private set; }
+        public static bool ValidateTls { get; private set; }
         public static bool IsDebug { get; private set; }
         public static string Query { get; private set; }
         public static int QueryTimeout { get; private set; }
         public static DateTime? TimeFrom { get; private set; }
         public static DateTime? TimeTo { get; private set; }
+        public static ReportDestination Destination { get; private set; }
+        public static string JiraUrl { get; private set; }
+        public static string JiraUsername { get; private set; }
+        public static string JiraPassword { get; private set; }
+        public static string JiraProject { get; private set; }
+        public static string JiraIssueType { get; private set; }
+        public static string JiraPriority { get; private set; }
+        public static string JiraAssignee { get; private set; }
+        public static string JiraLabels { get; private set; }
+        public static string JiraInitialEstimate { get; private set; }
+        public static string JiraRemainingEstimate { get; private set; }
+        public static string JiraDueDate { get; private set; }
         public static bool UseProxy { get; private set; }
         public static string ProxyServer { get; private set; }
         public static bool BypassProxyOnLocal { get; private set; }
@@ -48,15 +60,38 @@ namespace Seq.Client.Reporter
         {
             ConfigPath = AppDomain.CurrentDomain.GetData("APP_CONFIG_FILE").ToString();
             AppName = ConfigurationManager.AppSettings["AppName"];
+            ValidateTls = GetBool(ConfigurationManager.AppSettings["ValidateTls"], true);
             IsDebug = GetBool(ConfigurationManager.AppSettings["IsDebug"]);
             Query = ConfigurationManager.AppSettings["Query"].Replace("\\r", "").Replace("\\n", "");
             QueryTimeout = GetInt(ConfigurationManager.AppSettings["Query"]);
-            TimeFrom = GetStart(ConfigurationManager.AppSettings["TimeFrom"]);
-            TimeTo = GetEnd(ConfigurationManager.AppSettings["TimeTo"]);
+            TimeFrom = DateParse.GetDateTimeUtc(ConfigurationManager.AppSettings["TimeFrom"]);
+            TimeTo = DateParse.GetDateTimeUtc(ConfigurationManager.AppSettings["TimeTo"]);
             //Ensure TimeFrom is always in the past
             if (TimeFrom != null && TimeTo != null && ((DateTime) TimeTo - (DateTime) TimeFrom).TotalSeconds <= 0)
                 TimeFrom = ((DateTime) TimeFrom).AddDays(-1);
             Signal = GetSignals(ConfigurationManager.AppSettings["Signal"]);
+
+            Destination = GetReportDestination(ConfigurationManager.AppSettings["ReportDestination"]);
+
+            JiraUrl = ConfigurationManager.AppSettings["JiraUrl"];
+            JiraUsername = ConfigurationManager.AppSettings["JiraUsername"];
+            JiraPassword = ConfigurationManager.AppSettings["JiraPassword"];
+            JiraProject = ConfigurationManager.AppSettings["JiraProject"];
+            JiraAssignee = ConfigurationManager.AppSettings["JiraAssignee"];
+            JiraIssueType = ConfigurationManager.AppSettings["JiraIssueType"];
+            JiraPriority = ConfigurationManager.AppSettings["JiraPriority"];
+            JiraLabels = ConfigurationManager.AppSettings["JiraLabels"];
+
+            var date = ConfigurationManager.AppSettings["JiraInitialEstimate"];
+            if (!string.IsNullOrEmpty(date) && DateTokens.ValidDateExpression(date))
+                JiraInitialEstimate = DateTokens.SetValidExpression(date);
+            date = ConfigurationManager.AppSettings["JiraRemainingEstimate"];
+            if (!string.IsNullOrEmpty(date) && DateTokens.ValidDateExpression(date))
+                JiraRemainingEstimate = DateTokens.SetValidExpression(date);
+            date = ConfigurationManager.AppSettings["JiraDueDate"];
+            if (!string.IsNullOrEmpty(date) && DateTokens.ValidDateExpression(date))
+                JiraDueDate = DateTokens.SetValidExpression(date);
+
             UseProxy = GetBool(ConfigurationManager.AppSettings["UseProxy"]);
             ProxyServer = ConfigurationManager.AppSettings["ProxyServer"];
             BypassProxyOnLocal = GetBool(ConfigurationManager.AppSettings["BypassProxyOnLocal"]);
@@ -103,106 +138,6 @@ namespace Seq.Client.Reporter
             return configValue.Split(',').Select(s => s.Trim()).ToList();
         }
 
-        private static DateTime? GetStart(string configValue)
-        {
-            return ParseDateTime(configValue);
-        }
-
-        private static DateTime? GetEnd(string configValue)
-        {
-            return ParseDateTime(configValue);
-        }
-
-        private static DateTime? ParseDateTime(string configValue)
-        {
-            if (string.IsNullOrEmpty(configValue))
-                return null;
-            try
-            {
-                var now = DateTime.Now;
-
-                if (configValue.Equals("now", StringComparison.CurrentCultureIgnoreCase))
-                    return now.ToUniversalTime();
-
-                //Parse a time string if specified
-                const string timeExpression = "^((?:[0-1]?[0-9]|2[0-3])\\:(?:[0-5][0-9])(?:\\:[0-5][0-9])?)$";
-                if (Regex.IsMatch(configValue, timeExpression))
-                {
-                    var match = Regex.Match(configValue, timeExpression);
-                    return ParseTimeString(match.Groups[1].Value);
-                }
-
-                //Parse a date expression if specified
-                const string dateExpression = "^(\\d+)(s|m|h|d|w|M)$";
-                if (Regex.IsMatch(configValue, dateExpression))
-                {
-                    var match = Regex.Match(configValue, dateExpression);
-                    return ParseDateExpression(now, int.Parse(match.Groups[1].Value), match.Groups[2].Value);
-                }
-
-                //Parse a hybrid date expression with time if specified
-                const string hybridExpression =
-                    "^(\\d+)(s|m|h|d|w|M)\\s+((?:[0-1]?[0-9]|2[0-3])\\:(?:[0-5][0-9])(?:\\:[0-5][0-9])?)$";
-                if (Regex.IsMatch(configValue, hybridExpression))
-                {
-                    var match = Regex.Match(configValue, hybridExpression);
-                    var relativeTime = ParseTimeString(match.Groups[3].Value);
-                    return relativeTime != null
-                        ? ParseDateExpression(((DateTime) relativeTime).ToLocalTime(), int.Parse(match.Groups[1].Value),
-                            match.Groups[2].Value)
-                        : null;
-                }
-
-                //Attempt to parse using culture formatting rules
-                if (DateTime.TryParse(configValue, out var date))
-                    return date.ToUniversalTime();
-
-                return null;
-            }
-            catch (Exception)
-            {
-                return null;
-            }
-        }
-
-        private static DateTime? ParseDateExpression(DateTime startTime, int time, string expression)
-        {
-            switch (expression)
-            {
-                case "s":
-                    return startTime.AddSeconds(-time).ToUniversalTime();
-                case "m":
-                    return startTime.AddMinutes(-time).ToUniversalTime();
-                case "h":
-                    return startTime.AddHours(-time).ToUniversalTime();
-                case "d":
-                    return startTime.AddDays(-time).ToUniversalTime();
-                case "w":
-                    return startTime.AddDays(-(7 * time)).ToUniversalTime();
-                case "M":
-                    return startTime.AddMonths(-time).ToUniversalTime();
-                default:
-                    return null;
-            }
-        }
-
-        private static DateTime? ParseTimeString(string time)
-        {
-            var timeFormat = "H:mm:ss";
-            if (DateTime.TryParseExact(time, timeFormat, CultureInfo.InvariantCulture, DateTimeStyles.None,
-                out _))
-                return DateTime.ParseExact(time, timeFormat, CultureInfo.InvariantCulture,
-                    DateTimeStyles.None).ToUniversalTime();
-            timeFormat = "H:mm";
-            if (!DateTime.TryParseExact(time, timeFormat, CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out _))
-                return null;
-
-            return DateTime.ParseExact(time, timeFormat, CultureInfo.InvariantCulture,
-                DateTimeStyles.None).ToUniversalTime();
-        }
-
         /// <summary>
         ///     Convert the supplied <see cref="object" /> to an <see cref="int" />
         ///     <para />
@@ -227,14 +162,28 @@ namespace Seq.Client.Reporter
         ///     This will filter out nulls that could otherwise cause exceptions
         /// </summary>
         /// <param name="sourceObject">An object that can be converted to a bool</param>
+        /// <param name="trueIfEmpty"></param>
         /// <returns></returns>
-        public static bool GetBool(object sourceObject)
+        public static bool GetBool(object sourceObject, bool trueIfEmpty = false)
         {
             var sourceString = string.Empty;
 
             if (!Convert.IsDBNull(sourceObject)) sourceString = (string) sourceObject;
 
-            return bool.TryParse(sourceString, out var destBool) && destBool;
+            return bool.TryParse(sourceString, out var destBool) ? destBool : trueIfEmpty;
+        }
+
+        /// <summary>
+        ///     Return the configured report destination. Defaults to email if not matched.
+        /// </summary>
+        /// <param name="configValue"></param>
+        /// <returns></returns>
+        private static ReportDestination GetReportDestination(string configValue)
+        {
+            if (string.IsNullOrEmpty(configValue)) return ReportDestination.Email;
+            return Enum.TryParse(configValue, true, out ReportDestination destination)
+                ? destination
+                : ReportDestination.Email;
         }
     }
 }

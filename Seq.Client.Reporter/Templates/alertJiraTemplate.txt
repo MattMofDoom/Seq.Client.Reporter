@@ -1,0 +1,9 @@
+﻿h2. {{ReportName}} for {{Date}}
+
+Please find the {{ReportName}} for {{Date}} attached.
+
+||Report period:|{{From}} to {{To}}||
+||Record count:|{{RecordCount}}||
+||Destination:|{{Destination}}||
+{{#if Recipients}}||Email Recipients:|{{Recipients}}||{{/if}}
+

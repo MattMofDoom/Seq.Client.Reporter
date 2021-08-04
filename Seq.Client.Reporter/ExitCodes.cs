@@ -12,6 +12,7 @@
         TempFileError = 7,
         QueryError = 8,
         MailError = 9,
-        NothingDone = 10
+        JiraError = 10,
+        NothingDone = 11
     }
 }
