@@ -7,7 +7,7 @@
     <ApplicationIcon>Reporter.ico</ApplicationIcon>
     <PackageIcon>Reporter.png</PackageIcon>
     <PackageIconUrl />
-    <Version>1.0.3</Version>
+    <Version>1.0.4</Version>
     <Authors>Matt Marlor</Authors>
   </PropertyGroup>
 
@@ -20,7 +20,7 @@
     <PackageReference Include="CsvHelper" Version="27.1.1" />
     <PackageReference Include="Handlebars.Net" Version="2.0.9" />
     <PackageReference Include="Lurgle.Alerting" Version="1.2.3" />
-    <PackageReference Include="Lurgle.Dates" Version="1.0.7" />
+    <PackageReference Include="Lurgle.Dates" Version="1.0.8" />
     <PackageReference Include="Lurgle.Logging" Version="1.2.3" />
     <PackageReference Include="Seq.Api" Version="2021.2.0" />
   </ItemGroup>
