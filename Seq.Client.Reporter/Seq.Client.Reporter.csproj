@@ -7,7 +7,7 @@
     <ApplicationIcon>Reporter.ico</ApplicationIcon>
     <PackageIcon>Reporter.png</PackageIcon>
     <PackageIconUrl />
-    <Version>1.0.4</Version>
+    <Version>1.0.5</Version>
     <Authors>Matt Marlor</Authors>
   </PropertyGroup>
 
