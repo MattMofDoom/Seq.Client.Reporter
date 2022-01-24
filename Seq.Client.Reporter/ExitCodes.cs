@@ -1,4 +1,6 @@
-﻿namespace Seq.Client.Reporter
+﻿// ReSharper disable InconsistentNaming
+
+namespace Seq.Client.Reporter
 {
     public enum ExitCodes
     {

@@ -295,7 +295,6 @@ namespace Seq.Client.Reporter
 
                             if (Config.Destination.Equals(ReportDestination.Email) ||
                                 Config.Destination.Equals(ReportDestination.EmailAndJira))
-                            {
                                 try
                                 {
                                     if (Config.IsDebug)
@@ -311,7 +310,7 @@ namespace Seq.Client.Reporter
                                             Alerting.Config.MailTo, Alerting.Config.MailHost,
                                             Alerting.Config.MailPort,
                                             Alerting.Config.MailUseTls);
-                                    
+
                                     var alert = Alert.To().Subject("{0} for {1:D}", Config.AppName, DateTime.Today)
                                         .Attach(new MemoryStream(File.ReadAllBytes(filePath)),
                                             $"{Config.AppName}-{DateTime.Today:yyyy-M-d}.csv")
@@ -344,7 +343,6 @@ namespace Seq.Client.Reporter
                                     Log.Exception(ex).Add("Error sending email: {Message:l}", ex.Message);
                                     ExitApp(ExitCodes.MailError, filePath);
                                 }
-                            }
 
                             //Successful execution, exit with success
                             ExitApp(ExitCodes.Success, filePath);
@@ -383,10 +381,10 @@ namespace Seq.Client.Reporter
             currentAlertConfig = new AlertConfig(currentAlertConfig, alertConfig.AppName);
 
             //If MailHost is overridden, we treat these properties as an override group
-            if (!string.IsNullOrEmpty(alertConfig.MailHost))
+            if (!alertConfig.MailHost.Count.Equals(0))
                 currentAlertConfig = new AlertConfig(currentAlertConfig, mailRenderer: alertConfig.MailRenderer,
                     mailSender: alertConfig.MailSender,
-                    mailHost: alertConfig.MailHost, mailPort: alertConfig.MailPort,
+                    mailHost: string.Join(",", alertConfig.MailHost.ToArray()), mailPort: alertConfig.MailPort,
                     mailTestTimeout: alertConfig.MailTestTimeout,
                     mailUseAuthentication: alertConfig.MailUseAuthentication,
                     mailUsername: alertConfig.MailUsername, mailPassword: alertConfig.MailPassword,

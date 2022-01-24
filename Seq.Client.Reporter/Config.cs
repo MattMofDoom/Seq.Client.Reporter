@@ -133,7 +133,7 @@ namespace Seq.Client.Reporter
         private static IEnumerable<string> GetSignals(string configValue)
         {
             if (string.IsNullOrEmpty(configValue))
-                return new string[0];
+                return Array.Empty<string>();
 
             return configValue.Split(',').Select(s => s.Trim()).ToList();
         }
