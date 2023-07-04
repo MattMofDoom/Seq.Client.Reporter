@@ -7,7 +7,7 @@
     <ApplicationIcon>Reporter.ico</ApplicationIcon>
     <PackageIcon>Reporter.png</PackageIcon>
     <PackageIconUrl />
-    <Version>1.0.7</Version>
+    <Version>1.0.8</Version>
     <Authors>Matt Marlor</Authors>
     <PackageReleaseNotes>- Update dependencies</PackageReleaseNotes>
   </PropertyGroup>
@@ -18,12 +18,12 @@
 
   <ItemGroup>
     <PackageReference Include="Atlassian.SDK" Version="13.0.0" />
-    <PackageReference Include="CsvHelper" Version="28.0.1" />
-    <PackageReference Include="Handlebars.Net" Version="2.1.2" />
-    <PackageReference Include="Lurgle.Alerting" Version="1.3.7" />
-    <PackageReference Include="Lurgle.Dates" Version="1.0.15" />
-    <PackageReference Include="Lurgle.Logging" Version="1.2.12" />
-    <PackageReference Include="Seq.Api" Version="2022.1.0" />
+    <PackageReference Include="CsvHelper" Version="30.0.1" />
+    <PackageReference Include="Handlebars.Net" Version="2.1.4" />
+    <PackageReference Include="Lurgle.Alerting" Version="1.3.8" />
+    <PackageReference Include="Lurgle.Dates" Version="1.0.16" />
+    <PackageReference Include="Lurgle.Logging" Version="1.3.2" />
+    <PackageReference Include="Seq.Api" Version="2023.2.0" />
   </ItemGroup>
 
   <ItemGroup>
